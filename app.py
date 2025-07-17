@@ -15,29 +15,6 @@ app.title = 'Global Macro Dashboard'
 
 today = datetime.datetime.today().strftime('%Y-%m-%d')
 
-NEWS_COUNTRY_CODES = {
-    'USA': 'us',
-    'JPN': 'jp',
-    'SGP': 'sg',
-    'EU': 'gb',   # using UK as proxy for EU
-    'CHN': 'cn'
-}
-
-def get_news_headlines(country_code='us'):
-    api_key = '0fa37405cbc747eb9aef0b157fc28568' 
-    url = f'https://newsapi.org/v2/top-headlines?country={country_code}&apiKey={api_key}'
-    try:
-        r = requests.get(url)
-        data = r.json()
-        articles = data.get('articles', [])[:10]
-        if not articles:
-            fallback_url = f'https://newsapi.org/v2/top-headlines?category=business&language=en&apiKey={api_key}'
-            data = requests.get(fallback_url).json()
-            articles = data.get('articles', [])
-        return [article['title'] for article in articles]
-    except:
-        return ["Unable to fetch news."]
-
 def get_percent_change(current,previous):
     try:
         if isinstance(current, str) or isinstance(previous, str):
@@ -48,6 +25,11 @@ def get_percent_change(current,previous):
         return f"({pct:+.2f}%)"
     except:
         return ''
+    
+def get_latest_label(series):
+    if series is not None and not series.empty:
+        return f"[{series.index[-1]}]"
+    return ""
 
 # World Bank indicator codes
 WB_INDICATORS = {
@@ -126,16 +108,6 @@ app.layout = html.Div([
     html.H2("FX Rate vs USD"),
     dcc.Graph(id='fx-graph'),
 
-    html.Div([
-    html.H3("Market Headlines"),
-    html.Div(id='news-section')
-    ], style={'marginTop': '40px', 'padding': '20px', 'backgroundColor': '#1B3B5F', 'borderRadius': '8px'}),
-    dcc.Interval(
-    id='news-update-interval',
-    interval=10 * 60 * 1000,  # every 10 minutes
-    n_intervals=0
-    )
-
 ], style={
     'backgroundColor': '#102542',
     'padding': '40px',
@@ -170,7 +142,7 @@ def format_card(label, value, trend='', pct='', unit=''):
     return html.Div([
         html.H4(label),
         html.P(f"{value:.2f} {unit} {trend} {pct}" if isinstance(value, (int, float, np.number)) else f"{value} {trend} {pct}")
-    ], style={
+    ], title=f"{label}: {value} {unit} {pct}", style={
         'backgroundColor': '#1B3B5F',
         'padding': '15px 20px',
         'borderRadius': '10px',
@@ -375,10 +347,10 @@ def update_dashboard(selected_country):
 
     summary_cards = [
         format_card(f'Stock Index ({selected_ticker}) [Daily]', latest_close, stock_trend, stock_pct),
-        format_card('GDP Growth (%) [YoY]', gdp_value, gdp_trend, gdp_pct),
-        format_card('Inflation (CPI %) [YoY]', cpi_value, cpi_trend, cpi_pct),
-        format_card('Lending Rate (%) [YoY]', lend_value, lend_trend, lend_pct),
-        format_card('FX Rate [Daily]', fx_value, fx_trend, fx_pct)
+        format_card(f'GDP Growth (%) [YoY] {get_latest_label(gdp_series)}', gdp_value, gdp_trend, gdp_pct),
+        format_card(f'Inflation (CPI %) [YoY] {get_latest_label(cpi_series)}', cpi_value, cpi_trend, cpi_pct),
+        format_card(f'Lending Rate (%) [YoY] {get_latest_label(lend_series)}', lend_value, lend_trend, lend_pct),
+        format_card(f'FX Rate [Daily] {get_latest_label(fx_series) if selected_fx_ticker else ""}', fx_value, fx_trend, fx_pct)
     ]
 
     gdp_fig = go.Figure()
@@ -399,16 +371,6 @@ def update_dashboard(selected_country):
         
     print(stock_data.head())
     return stock_fig, gdp_fig, inf_fig, ir_fig, rinr_fig, fx_fig, summary_cards
-
-@app.callback(
-    Output('news-section', 'children'),
-    Input('news-update-interval', 'n_intervals'),
-    Input('country-dropdown', 'value')
-)
-def update_news(n, selected_country):
-    code = NEWS_COUNTRY_CODES.get(selected_country, 'us')
-    headlines = get_news_headlines(code)
-    return html.Ul([html.Li(h, style={'paddingBottom': '5px'}) for h in headlines])
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
