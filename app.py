@@ -15,20 +15,31 @@ app.title = 'Global Macro Dashboard'
 
 today = datetime.datetime.today().strftime('%Y-%m-%d')
 
-def get_percent_change(current,previous):
-    try:
-        if isinstance(current, str) or isinstance(previous, str):
-            return ''
-        if current is None or previous is None or previous == 0:
-            return ''
-        pct = (current - previous) / previous * 100
-        return f"({pct:+.2f}%)"
-    except:
-        return ''
+def get_macro_change(latest, prev, indicator=""):
+    if latest is None or prev is None or pd.isna(latest) or pd.isna(prev):
+        return "N/A"
+    
+    diff = latest - prev
+
+    if indicator == "Lending Rate":
+        return f"{int(diff * 100):+} bps"  
+    elif indicator in ["GDP Growth", "Inflation"]:
+        return f"{diff:+.1f}%"  
+    else:
+        return f"{diff:+.2f}" 
     
 def get_latest_label(series):
     if series is not None and not series.empty:
-        return f"[{series.index[-1]}]"
+        last_index = series.index[-1]
+        if isinstance(last_index, (int, float)):
+            return f"[{int(last_index)}]"
+        elif isinstance(last_index, (str)):
+            return f"j[{last_index}]"
+        else:
+            try:
+                return f"[{last_index.strftime('%Y-%m-%d')}]"
+            except:
+                return f"[{last_index}]"
     return ""
 
 # World Bank indicator codes
@@ -165,7 +176,6 @@ def format_card(label, value, trend='', pct='', unit=''):
     [Input('country-dropdown', 'value')]
 )
 def update_dashboard(selected_country):
-    # Map country ISO to index
     ticker_map = {
         'USA': '^GSPC',
         'JPN': '^N225',
@@ -176,7 +186,7 @@ def update_dashboard(selected_country):
     selected_ticker = ticker_map[selected_country]
 
     fx_ticker_map = {
-    'USA': None,  # Base currency
+    'USA': None, 
     'JPN': 'USDJPY=X',
     'SGP': 'USDSGD=X',
     'EU': 'USDEUR=X',
@@ -184,14 +194,11 @@ def update_dashboard(selected_country):
     }
     selected_fx_ticker = fx_ticker_map[selected_country]
 
-   # Fetch and clean stock data
     stock_data = yf.download(selected_ticker, start='2000-01-01', end=today, interval='1d')
 
-    # If MultiIndex (e.g. columns like ("Close", "^GSPC")), flatten it
     if isinstance(stock_data.columns, pd.MultiIndex):
         stock_data.columns = stock_data.columns.get_level_values(0)
 
-    # Clean data
     stock_data = stock_data[~stock_data.index.duplicated(keep='first')]
     stock_data = stock_data.sort_index()
 
@@ -236,7 +243,6 @@ def update_dashboard(selected_country):
             template='plotly_dark'
         )
 
-    # Fetch macroeconomic data
     wb_country_codes = {
     'USA': 'USA',
     'JPN': 'JPN',
@@ -284,7 +290,6 @@ def update_dashboard(selected_country):
             template='plotly_dark'
         )
 
-    # Latest values (with safe fallback)
     latest_close = stock_data['Close'].dropna().iloc[-1] if not stock_data.empty else 'N/A'
 
     gdp_latest = macro_data['GDP Growth (%)'].dropna(subset=['NY.GDP.MKTP.KD.ZG'])
@@ -299,58 +304,52 @@ def update_dashboard(selected_country):
     rinr_latest = macro_data['Real Interest Rate (%)'].dropna(subset=['FR.INR.RINR'])
     rinr_value = rinr_latest['FR.INR.RINR'].iloc[-1] if not rinr_latest.empty else 'N/A'
 
-    #Stock index trend
     stock_series = stock_data['Close'].dropna()
     stock_prev = stock_series.iloc[-2] if len(stock_series) >= 2 else None
     stock_trend = get_trend_symbol(latest_close, stock_prev)
-    stock_pct = get_percent_change(latest_close, stock_prev)
+    stock_pct = get_macro_change(latest_close, stock_prev, "Stock Index") + "%"
 
-    # GDP trend
     gdp_series = macro_data['GDP Growth (%)']['NY.GDP.MKTP.KD.ZG'].dropna()
     gdp_value = gdp_series.iloc[-1] if not gdp_series.empty else 'N/A'
     gdp_prev = gdp_series.iloc[-2] if len(gdp_series) >= 2 else None
     gdp_trend = get_trend_symbol(gdp_value, gdp_prev)
-    gdp_pct = get_percent_change(gdp_value, gdp_prev)
+    gdp_pct = get_macro_change(gdp_value, gdp_prev, "GDP Growth")
 
-    # CPI trend
     cpi_series = macro_data['Inflation (CPI %)']['FP.CPI.TOTL.ZG'].dropna()
     cpi_value = cpi_series.iloc[-1] if not cpi_series.empty else 'N/A'
     cpi_prev = cpi_series.iloc[-2] if len(cpi_series) >= 2 else None
     cpi_trend = get_trend_symbol(cpi_value, cpi_prev)
-    cpi_pct = get_percent_change(cpi_value, cpi_prev)
+    cpi_pct = get_macro_change(cpi_value, cpi_prev, "Inflation")
 
-    # Lending rate trend
     lend_series = macro_data['Lending Rate (%)']['FR.INR.LEND'].dropna()
     lend_value = lend_series.iloc[-1] if not lend_series.empty else 'N/A'
     lend_prev = lend_series.iloc[-2] if len(lend_series) >= 2 else None
     lend_trend = get_trend_symbol(lend_value, lend_prev)
-    lend_pct = get_percent_change(lend_value, lend_prev)
+    lend_pct = get_macro_change(lend_value, lend_prev, "Lending Rate")
 
-    # Real rate trend
     rinr_series = macro_data['Real Interest Rate (%)']['FR.INR.RINR'].dropna()
     rinr_value = rinr_series.iloc[-1] if not rinr_series.empty else 'N/A'
     rinr_prev = rinr_series.iloc[-2] if len(rinr_series) >= 2 else None
-    rinr_trend = get_trend_symbol(rinr_value, rinr_prev)
-    rinr_pct = get_percent_change(rinr_value, rinr_prev)
+    ## rinr_trend = get_trend_symbol(rinr_value, rinr_prev)
+    ## rinr_pct = get_macro_change(rinr_value, rinr_prev, "Real Interest Rate")
 
-    # FX trend
     if selected_fx_ticker and fx_data is not None and not fx_data.empty:
         fx_series = fx_data['Close'].dropna()
         fx_value = fx_series.iloc[-1]
         fx_prev = fx_series.iloc[-2] if len(fx_series) >= 2 else None
         fx_trend = get_trend_symbol(fx_value, fx_prev)
-        fx_pct = get_percent_change(fx_value, fx_prev)
+        fx_pct = get_macro_change(fx_value, fx_prev, "FX Rate") + "%"
     else:
         fx_value = 'Base Currency (USD)'
         fx_trend = ''
         fx_pct = ''
 
     summary_cards = [
-        format_card(f'Stock Index ({selected_ticker}) [Daily]', latest_close, stock_trend, stock_pct),
-        format_card(f'GDP Growth (%) [YoY] {get_latest_label(gdp_series)}', gdp_value, gdp_trend, gdp_pct),
-        format_card(f'Inflation (CPI %) [YoY] {get_latest_label(cpi_series)}', cpi_value, cpi_trend, cpi_pct),
-        format_card(f'Lending Rate (%) [YoY] {get_latest_label(lend_series)}', lend_value, lend_trend, lend_pct),
-        format_card(f'FX Rate [Daily] {get_latest_label(fx_series) if selected_fx_ticker else ""}', fx_value, fx_trend, fx_pct)
+        format_card(f'Stock Index ({selected_ticker}) {get_latest_label(stock_series)}', latest_close, stock_trend, stock_pct),
+        format_card(f'GDP Growth (%) [{int(gdp_latest["year"].iloc[-1])}]' if not gdp_latest.empty else 'GDP Growth (%)', gdp_value, gdp_trend, gdp_pct),
+        format_card(f'Inflation (CPI %) [{int(cpi_latest["year"].iloc[-1])}]' if not cpi_latest.empty else 'Inflation (CPI %)', cpi_value, cpi_trend, cpi_pct),
+        format_card(f'Lending Rate (%) [{int(lend_latest["year"].iloc[-1])}]' if not lend_latest.empty else 'Lending Rate (%)', lend_value, lend_trend, lend_pct),
+        format_card(f'FX Rate {get_latest_label(fx_series) if selected_fx_ticker else ""}', fx_value, fx_trend, fx_pct)
     ]
 
     gdp_fig = go.Figure()
